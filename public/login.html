@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#070707" />
+    <title>Sign in · OUEMS Open Decks</title>
+    <link rel="icon" href="/assets/site-icon.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="login-shell">
+      <div class="login-brand">
+        <img
+          src="/assets/ouems-logo.png"
+          alt="Oxford Electronic Music Society"
+        />
+        <p class="eyebrow">The Open Decks workspace</p>
+      </div>
+      <section class="login-panel">
+        <p class="eyebrow">Build the lineup</p>
+        <h1>Open <span>Decks.</span></h1>
+        <h2 id="login-title">Sign in</h2>
+        <p id="login-description">
+          Use your organiser account to open the workspace.
+        </p>
+        <div id="login-error" class="inline-error" role="alert" hidden></div>
+        <form id="login-form">
+          <div class="field" id="setup-name" hidden>
+            <label for="display-name">Your name</label
+            ><input
+              id="display-name"
+              name="name"
+              maxlength="100"
+              autocomplete="name"
+            />
+          </div>
+          <div class="field">
+            <label for="login-username">Username</label
+            ><input
+              id="login-username"
+              name="username"
+              required
+              minlength="3"
+              maxlength="100"
+              autocomplete="username"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+          </div>
+          <div class="field">
+            <label for="login-password">Password</label
+            ><input
+              id="login-password"
+              name="password"
+              type="password"
+              required
+              minlength="12"
+              maxlength="256"
+              autocomplete="current-password"
+            />
+          </div>
+          <div class="field" id="setup-key" hidden>
+            <label for="setup-token">Administrator setup key</label
+            ><input
+              id="setup-token"
+              name="setupToken"
+              type="password"
+              autocomplete="off"
+            />
+          </div>
+          <button id="login-submit" type="submit" class="primary">
+            Sign in
+          </button>
+        </form>
+        <p class="hint" id="password-help">
+          Need an account or a password reset? Contact your administrator.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="/login.js"></script>
+  </body>
+</html>

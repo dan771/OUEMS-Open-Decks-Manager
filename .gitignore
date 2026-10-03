@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.local/
+.tools/
+.dev.vars
+.env
+*.private.csv
+ouems-reference.*
+test-results/
+playwright-report/
+wrangler.local.json
+wrangler.deploy.json
+google-credentials*.json

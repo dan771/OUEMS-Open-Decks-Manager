@@ -1,0 +1,44 @@
+# Acceptance checks
+
+These scenarios define the intended behaviour before implementation. Automated tests cover the data rules and API. The browser checks cover the interactive workflow.
+
+1. Create MT26 from a response sheet. Discover all four dates from the timing column headers even if there are no responses. HT27 and TT27 use 2027; an invalid term is rejected. Preview detected fields and dates before creating.
+2. Import a response: use DJ name, falling back to full name; genres, vinyl interest and one of the four experience labels appear on the card. Ambiguous experience is marked for review. Full original question/answer transcript remains available.
+3. Edit a profile and any transcript answer; save, refresh, and reopen it. Changes persist. Comments show a count on the card, with their content inside the dialog only.
+4. Move a card from Unassigned into Early/Late. Plan sets orders all assigned DJs, groups two different DJs into a B2B and edits individual durations. Saved times appear directly in Early/Late, with no separate planner dropdown. Add moves an existing card; Duplicate explicitly creates another. Remove returns a card to Unassigned and preserves its B2B partner.
+5. Available Friday + late becomes Late · Friday; available Monday + Don't mind becomes Early & Late · Monday. First/second-half answers, apostrophe variants, textual preferences and time ranges are recognised. The editor's interpreted summary updates immediately when preferences change. Dragging highlights available halves and specific time slots. Unavailable or non-preferred targets still accept drops and show a warning. Moving into an occupied slot swaps placements, preserving both instances.
+6. Configure 18:00–00:00 in 45-minute sets. Eight slots result; overnight times are supported. A final shorter slot is allowed. The Early/Late boundary defaults to the midpoint; a custom split must fall within the night. Reconfiguration never deletes a card: unmatched exact-set assignments stay in their current half. Legacy waiting-list cards retain their placements when availability is edited.
+7. Reimport unchanged responses: zero new cards. Change a source response: existing edits, initial response, comments and placements stay intact. Append a new response: exactly one new card. Polling and scheduled imports behave identically.
+8. Revert restores initial profile fields and transcript on all duplicates. Comments and placements survive. Manually added profiles revert to their original entry.
+9. Two clients save from the same version: the second gets a conflict and reloads, with no silent overwriting. Polling does not replace unsaved dialog edits; stale dialog saves are rejected.
+10. API and board/code assets without authentication are denied on all hosts, including localhost. Only login assets are public. First-run local setup creates an administrator; production setup requires HTTPS and an owner secret. No default credentials or Access-identity bypass. Credentials and exports are protected. Same-origin and CSRF checks reject unverified mutations.
+11. A private Sheet is read using a read-only service account. No public-sharing requirement; no writes to the Google Sheet. Source failure is visible and leaves cards intact. Imports continue on a five-minute cron without an open browser.
+12. Run the demo without Google/Cloudflare credentials. Create another term, add a DJ, duplicate, move, configure, comment, edit, revert and export. Refresh preserves local state. Repeat at mobile width using the Add/Move controls.
+13. Each date has two collapsible lists and no waiting list. The non-compact board fills at least 80% of the visible viewport on desktop, tablet and portrait phones, with columns scrolling independently and no page-level vertical scrolling. Collapse/expand works with a keyboard and survives refresh. Dropping into a collapsed half expands it. Compact mode preserves important card information and survives refresh. Ten DJs in one half, and ten split across both halves, fit without vertical scrolling at 1280×768 with the exact-set planner closed. Browser tests use synthetic DJs and their own state file.
+14. Scroll the board and columns, then move cards by dragging, Add and the card editor. Scroll positions survive moves, capped at the remaining content's maximum scroll. Each card shows one availability column per night, Early above Late. Remove buttons must not cover availability dots. Compact cards remain 32 pixels high.
+15. Administrators create, disable and reset accounts and assign roles. Managers edit/create boards and plan lineups but cannot access users, history, restore, original-response revert or export. Viewers cannot mutate data or fetch raw form transcripts/team notes. Role/password changes revoke sessions. The last active administrator remains protected.
+16. History records authors and before/after edits. Save seven states; only five remain. Restore without altering accounts or erasing history; retain a pre-restore safety copy. Reject stale restores and unauthorized direct API calls.
+17. Sessions use hashed random tokens and expire after eight hours. Sign-out/password changes revoke them. Production cookies use Secure, HttpOnly, SameSite=Strict and __Host-. Forged/expired/revoked cookies fail. Persistent counters rate limit failed sign-ins. Public login bodies are size limited.
+18. Add a named venue night. Configure automatic timing, then set a B2B and manual 60-minute closer. Reopen/refresh: ordering, partners and times persist in Early/Late on desktop/mobile. Validate complete membership, distinct B2B profiles, duration bounds, overrun and overnight times.
+19. Import or enter optional ethnicity and gender. Existing form answers populate legacy profiles without replacing manual edits or explicit blanks. Edit and refresh: fields persist. Search both fields in the board and Add picker independently of card display. Toggle genres versus ethnicity/gender in either density, retain the choice after refresh, and preserve the fullscreen board layout on desktop and phones.
+20. Import or edit College, including legacy transcript answers. Only filled colleges have a university icon and hover shows the college. Assigned cards have independent final-confirmation ticks; refresh preserves status, keyboard/mouse/touch can toggle it, and controls fit in both densities. Reordering within a night preserves confirmation; unassigning or swapping/moving between nights clears it. Viewers cannot toggle confirmations.
+21. Managers and administrators delete nights through Configure; cards return to Unassigned without times or confirmations. Only administrators delete entire boards. Both deletions save an exact pre-deletion workspace, including placements and confirmations, and record the author. Reject stale, missing-target and unauthorized requests without creating snapshots. A snapshot failure leaves the workspace untouched. Restore a deletion without changing accounts or losing history.
+22. Mobile shows one column at a time, with previous/next buttons including Unassigned. Boundary buttons disable, navigation survives refresh, filters and both densities still work, and deletion picks a surviving column. No horizontal board/page scroll; retain at least 80% viewport height. Resizing to desktop reveals all columns.
+
+## Running
+
+`npm test` runs the unit and API integration tests. `npm run check` checks JS syntax. `npm run dev` starts http://localhost:8787 with local file persistence in `.local/state.json` and synthetic demo data. On Windows without Node on PATH, `./start.ps1` can use the Codex bundled Node runtime. All demo names and answers are fictional; the example Sheet's private responses are not committed.
+
+## Cloudflare runtime check
+
+The Worker and real local D1 database can also be exercised without a Cloudflare account:
+
+```sh
+node scripts/prepare-worker-test.mjs
+npx wrangler d1 migrations apply ouems-open-decks --local --config wrangler.local.json
+npx wrangler dev --config wrangler.local.json --port 8791
+```
+
+In another terminal, run `node scripts/check-worker.mjs`. This checks persistent D1 saves, save conflicts, imports and the actual scheduled handler through Cloudflare's Local Explorer API. The generated config is ignored by Git and enables the local identity only on loopback; the production config remains protected.
+
+The suite includes 40 domain/API/security tests and 14 desktop/mobile browser workflows. The local D1/Worker check covers real scrypt login, persistent edits, conflicts, imports, B2B plans, saved states, restore and the scheduled handler. Private-Sheet token tests use a generated test key and mocked Google endpoints. Live private-Sheet access and deployed HTTPS login need your actual configuration. Runtime-test credentials exist only in test files/local test databases, never as app defaults.
