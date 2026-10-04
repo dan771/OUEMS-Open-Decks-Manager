@@ -1,34 +1,63 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "ouems-open-decks",
-  "main": "worker.js",
-  "workers_dev": true,
-  "compatibility_date": "2026-10-03",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": "./public",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": true,
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "ouems-open-decks",
-      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
-      "migrations_dir": "migrations",
-    },
-  ],
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "durable_objects": {
-    "bindings": [
-      { "name": "COLLABORATION", "class_name": "CollaborationHub" },
-      { "name": "WORKSPACE", "class_name": "WorkspaceService" },
-    ],
-  },
-  "migrations": [
-    { "tag": "collaboration-v1", "new_sqlite_classes": ["CollaborationHub"] },
-    { "tag": "workspace-v1", "new_sqlite_classes": ["WorkspaceService"] },
-  ],
-  "observability": { "enabled": true },
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "ouems-open-decks",
+	"main": "worker.js",
+	"workers_dev": true,
+	"compatibility_date": "2026-10-03",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": "./public",
+		"binding": "ASSETS",
+		"not_found_handling": "single-page-application",
+		"run_worker_first": true,
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "ouems-open-decks",
+			"database_id": "55824a6e-5c03-4b52-9a9e-6e2bdcf022e1",
+			"migrations_dir": "migrations",
+		},
+		{
+			"binding": "ouems_open_decks",
+			"database_name": "ouems-open-decks",
+			"database_id": "55824a6e-5c03-4b52-9a9e-6e2bdcf022e1"
+		},
+	],
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		]
+	},
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "COLLABORATION",
+				"class_name": "CollaborationHub"
+			},
+			{
+				"name": "WORKSPACE",
+				"class_name": "WorkspaceService"
+			},
+		],
+	},
+	"migrations": [
+		{
+			"tag": "collaboration-v1",
+			"new_sqlite_classes": [
+				"CollaborationHub"
+			]
+		},
+		{
+			"tag": "workspace-v1",
+			"new_sqlite_classes": [
+				"WorkspaceService"
+			]
+		},
+	],
+	"observability": {
+		"enabled": true
+	},
 }

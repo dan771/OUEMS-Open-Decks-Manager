@@ -113,6 +113,20 @@ const patterns = {
 export function normalizeProfileFields(state) {
   for (const term of state.terms || []) {
     for (const profile of term.profiles) {
+      const original = profile.original?.fields;
+      const vinylAnswer = profile.original?.transcript?.find(({ question }) =>
+        term.mappingHeaders?.vinyl
+          ? question === term.mappingHeaders.vinyl
+          : patterns.vinyl.test(question),
+      );
+      if (original && vinylAnswer) {
+        const vinyl = inferVinyl(vinylAnswer.answer);
+        if (profile.vinyl === original.vinyl) profile.vinyl = vinyl;
+        original.vinyl = vinyl;
+      }
+      if (!profile.vinyl || profile.vinyl === "either") profile.vinyl = "learn";
+      if (original && (!original.vinyl || original.vinyl === "either"))
+        original.vinyl = "learn";
       for (const key of ["college", "ethnicity", "gender"]) {
         const original = profile.original;
         if (original?.fields && !(key in original.fields)) {
@@ -189,11 +203,28 @@ export function inferExperience(value) {
   return { level: "bedroom", review: true };
 }
 export function inferVinyl(value) {
-  const text = clean(value).toLowerCase();
-  if (/^no\b|not interested/.test(text)) return "no";
-  if (/learn|no experience|0 experience/.test(text)) return "learn";
-  if (/^yes\b|vinyl dj|experienced/.test(text)) return "yes";
-  return "either";
+  const text = clean(value).toLowerCase().replace(/’/g, "'");
+  if (
+    /\bnot interested\b|\b(?:don't|do not) want to (?:play|learn|try)\b|^digital only\b/.test(
+      text,
+    )
+  )
+    return "no";
+  // Lack of experience and qualified answers express interest, not a firm yes/no.
+  if (
+    /\b(?:learn\w*|beginner|inexperienced|no (?:vinyl )?experience|0 experience|never|not|maybe|perhaps|possibly|probably|unsure|uncertain|but|however|although)\b|\b(?:don't|do not|haven't|have not)\b|\?/.test(
+      text,
+    )
+  )
+    return "learn";
+  if (/^(?:no|nope|nah)\b/.test(text)) return "no";
+  if (
+    /^(?:yes|yep|yeah|absolutely|definitely)\b|\bvinyl dj\b|\bexperienced\b/.test(
+      text,
+    )
+  )
+    return "yes";
+  return "learn";
 }
 export function timeMinutes(time) {
   if (!/^\d{2}:\d{2}$/.test(time)) throw new Error("Enter a valid time.");
@@ -551,7 +582,7 @@ export function applyAction(state, action, author = "Team", createSetId = uid) {
       if ("vinyl" in f) {
         if (!["no", "yes", "learn", "either"].includes(f.vinyl))
           throw new Error("Choose a valid vinyl preference.");
-        profile.vinyl = f.vinyl;
+        profile.vinyl = f.vinyl === "either" ? "learn" : f.vinyl;
       }
       if (f.availability)
         for (const night of term.nights) {
@@ -859,8 +890,10 @@ export function applyAction(state, action, author = "Team", createSetId = uid) {
           : "beginner",
         needsReview: false,
         vinyl: ["yes", "no", "learn", "either"].includes(fields.vinyl)
-          ? fields.vinyl
-          : "either",
+          ? fields.vinyl === "either"
+            ? "learn"
+            : fields.vinyl
+          : "learn",
         availability: Object.fromEntries(
           term.nights.map((n) => [n.date, { available: null, timing: "" }]),
         ),

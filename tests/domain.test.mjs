@@ -15,6 +15,7 @@ import {
   periodBounds,
   instancePeriod,
   inferExperience,
+  inferVinyl,
   validateTerm,
   emptyState,
   normalizeProfileFields,
@@ -66,6 +67,84 @@ function setup() {
     profile: term.profiles[0],
   };
 }
+test("vinyl answers require a firm yes or no and otherwise default to interested", () => {
+  for (const answer of ["Yes", "Yes, I play vinyl", "Experienced vinyl DJ"])
+    assert.equal(inferVinyl(answer), "yes", answer);
+  for (const answer of [
+    "No",
+    "No thanks",
+    "Not interested",
+    "Digital only",
+    "No, not interested in learning",
+  ])
+    assert.equal(inferVinyl(answer), "no", answer);
+  for (const answer of [
+    "",
+    undefined,
+    "Maybe",
+    "Yes, maybe",
+    "Yes?",
+    "Yes but inexperienced",
+    "No experience",
+    "No vinyl experience",
+    "No, but would like to learn",
+    "Not a vinyl DJ",
+    "Not experienced",
+    "I don't know",
+    "Would like to learn",
+    "Either",
+    "Interested",
+  ])
+    assert.equal(inferVinyl(answer), "learn", String(answer));
+
+  const rows = [
+    headers,
+    ...["Yes", "No", "No experience", "Maybe", ""].map((answer, index) => {
+      const response = [...row];
+      response[0] = `vinyl-${index}`;
+      response[11] = answer;
+      return response;
+    }),
+  ];
+  assert.deepEqual(
+    createTerm("MT26", "", rows).profiles.map((profile) => profile.vinyl),
+    ["yes", "no", "learn", "learn", "learn"],
+  );
+  const { state, term } = setup();
+  applyAction(
+    state,
+    { type: "add", termId: term.id, fields: { name: "New DJ" } },
+    "Tester",
+  );
+  assert.equal(term.profiles.at(-1).vinyl, "learn");
+});
+
+test("existing imported vinyl defaults are corrected while manual preferences survive", () => {
+  const { state, term, profile } = setup();
+  const answer = profile.original.transcript.find(({ question }) =>
+    /vinyl/i.test(question),
+  );
+  answer.answer = "No experience";
+  profile.vinyl = profile.original.fields.vinyl = "no";
+  normalizeProfileFields(state);
+  assert.equal(profile.vinyl, "learn");
+  assert.equal(profile.original.fields.vinyl, "learn");
+  normalizeProfileFields(state);
+  assert.equal(profile.vinyl, "learn");
+
+  profile.vinyl = "yes";
+  profile.original.fields.vinyl = "either";
+  answer.answer = "Maybe";
+  normalizeProfileFields(state);
+  assert.equal(profile.vinyl, "yes");
+  assert.equal(profile.original.fields.vinyl, "learn");
+  applyAction(
+    state,
+    { type: "revert", termId: term.id, profileId: profile.id },
+    "Tester",
+  );
+  assert.equal(profile.vinyl, "learn");
+});
 test("final confirmations are independent per appearance and reset on reassignment", () => {
   const { state, term, instance } = setup();
   const act = (type, data = {}) =>

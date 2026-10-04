@@ -459,29 +459,38 @@ test("demographic fields import, edit, search and switch on cards in both densit
   await expect(page.locator(".picker-item")).toContainText("South Asian");
 });
 
-test("compact experience and plain vinyl markers sit side by side without covering dots or remove buttons", async ({
+test("distinct vinyl and interested markers fit compact cards without covering dots or controls", async ({
   page,
 }) => {
   let { state } = await (await page.request.get("/api/state")).json();
   const rows = [
     [...sheet[0], "College"],
-    ...["Gigging vinyl", "Beginner vinyl", "Unspecified format"].map(
-      (name, index) => {
-        const row = [...sheet[1]];
-        row[0] = `layout-${index}`;
-        row[2] = name;
-        row[10] =
-          index === 0
-            ? "Gigging"
-            : index === 1
-              ? "Absolute beginner"
-              : "Ambiguous experience";
-        row[11] =
-          index === 0 ? "Yes" : index === 1 ? "Would like to learn" : "";
-        row.push(index === 1 ? "Wadham" : "");
-        return row;
-      },
-    ),
+    ...[
+      "Gigging vinyl",
+      "Beginner vinyl",
+      "Unspecified format",
+      "Digital only",
+    ].map((name, index) => {
+      const row = [...sheet[1]];
+      row[0] = `layout-${index}`;
+      row[2] = name;
+      row[10] =
+        index === 0
+          ? "Gigging"
+          : index === 1
+            ? "Absolute beginner"
+            : "Ambiguous experience";
+      row[11] =
+        index === 0
+          ? "Yes"
+          : index === 1
+            ? "Would like to learn"
+            : index === 2
+              ? ""
+              : "No";
+      row.push(index === 1 ? "Wadham" : "");
+      return row;
+    }),
   ];
   const created = await page.request.post("/api/terms", {
     headers: { Origin: "http://localhost:8790" },
@@ -560,9 +569,10 @@ test("compact experience and plain vinyl markers sit side by side without coveri
         fits: true,
         dotsClear: true,
       });
-    await expect(page.locator(".vinyl-marker")).toHaveCount(3);
+    await expect(page.locator(".vinyl-marker")).toHaveCount(4);
     await expect(page.locator(".review-symbol")).toHaveCount(0);
     expect(await page.locator(".vinyl-marker").allTextContents()).toEqual([
+      "",
       "",
       "",
       "",
@@ -571,4 +581,19 @@ test("compact experience and plain vinyl markers sit side by side without coveri
       path: `test-results/compact-aligned-${width}.png`,
     });
   }
+  const vinyl = page.locator('.vinyl-marker[aria-label="Vinyl"]');
+  const interested = page.locator(
+    '.vinyl-marker[aria-label="Interested in vinyl"]',
+  );
+  await expect(vinyl).toHaveCount(1);
+  await expect(interested).toHaveCount(3);
+  expect(await vinyl.locator("path").getAttribute("d")).not.toBe(
+    await interested.first().locator("path").getAttribute("d"),
+  );
+  await expect(
+    page
+      .locator(".dj-card")
+      .filter({ hasText: "Digital only" })
+      .locator(".vinyl-marker"),
+  ).toHaveCount(0);
 });
