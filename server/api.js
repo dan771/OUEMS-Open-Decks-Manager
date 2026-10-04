@@ -5,7 +5,15 @@ import {
   importRows,
   validateTerm,
 } from "../public/lib/domain.js";
-import { loadState, mutate } from "./store.js";
+import { loadState, mutate, stateVersion, changesSince } from "./store.js";
+import {
+  actionBasis,
+  equal,
+  conflictFields,
+  setIds,
+} from "../public/lib/collaboration.js";
+import { authorizeLive, publish } from "./realtime.js";
+import { createHash } from "node:crypto";
 import { readSheet } from "./sheets.js";
 import {
   authenticate,
@@ -39,6 +47,98 @@ const json = (data, status = 200) =>
       "X-Content-Type-Options": "nosniff",
     },
   });
+function actionSummary(action, profile, night, term) {
+  const name = profile?.name || "DJ";
+  const destination = night
+    ? `${night.date}${action.period ? ` (${action.period === "late" ? "Late" : "Early"})` : ""}`
+    : "Unassigned";
+  switch (action.type) {
+    case "move":
+      return `Moved ${name} to ${destination}`;
+    case "confirm":
+      return `${action.confirmed ? "Confirmed" : "Cleared confirmation for"} ${name}`;
+    case "edit":
+      return `Updated ${name}`;
+    case "comment":
+      return `Commented on ${name}`;
+    case "duplicate":
+      return `Duplicated ${name}`;
+    case "revert":
+      return `Restored initial response for ${name}`;
+    case "plan":
+      return `Planned sets for ${night?.date}`;
+    case "clear-plan":
+      return `Cleared set timings for ${night?.date}`;
+    case "configure":
+      return `Configured ${night?.date}`;
+    case "add-night":
+      return `Added night ${action.date}`;
+    case "add":
+      return `Added DJ ${action.fields?.name || ""}`;
+    case "delete-night":
+      return `Deleted night ${night?.date}`;
+    case "delete-board":
+      return `Deleted Open Decks ${term?.code}`;
+    default:
+      return `Updated Open Decks ${term?.code || "board"}`;
+  }
+}
+function mutationOptions(input, user, path) {
+  let operation;
+  if (input.operationId !== undefined) {
+    if (
+      typeof input.operationId !== "string" ||
+      !/^[a-zA-Z0-9_-]{12,100}$/.test(input.operationId)
+    )
+      throw new Error("Invalid save identifier.");
+    operation = {
+      id: input.operationId,
+      userId: user.id,
+      fingerprint: createHash("sha256")
+        .update(JSON.stringify({ path, input }))
+        .digest("hex"),
+    };
+  }
+  const independent = input.base && path === "/api/action";
+  return {
+    operation,
+    expectedVersion:
+      (independent && !["delete-board", "delete-night"].includes(input.type)) ||
+      (operation && path === "/api/terms")
+        ? null
+        : (input.version ?? null),
+    check: independent
+      ? (state) => {
+          const current = actionBasis(state, input);
+          if (!equal(input.base, current)) {
+            const error = fail(
+              "The board changed in the same fields or placement you edited. Your draft is safe. Review the conflicting changes before saving.",
+              409,
+            );
+            error.conflicts = conflictFields(input.base, current);
+            throw error;
+          }
+        }
+      : undefined,
+  };
+}
+function appendResponses(term, rows) {
+  if (!term)
+    throw new Error(
+      "The board was removed while responses were being checked.",
+    );
+  const lastImport = term.lastImport;
+  const result = importRows(term, rows);
+  if (!result.added) term.lastImport = lastImport;
+  return result;
+}
+function snapshotId(user, input, purpose) {
+  return input.operationId
+    ? createHash("sha256")
+        .update(`${user.id}:${input.operationId}:${purpose}`)
+        .digest("hex")
+    : undefined;
+}
 async function body(request, limit = 2_000_000) {
   if (Number(request.headers.get("content-length") || 0) > limit)
     throw fail("Request too large.", 413);
@@ -108,17 +208,81 @@ export async function handleApi(request, env, ctx) {
     const user = await authenticate(request, env);
     const author = user.name || user.username;
     if (request.method !== "GET") requireCsrf(request, user);
-    if (path === "/api/state" && request.method === "GET")
+    if (path === "/api/live" && request.method === "GET") {
+      if (!env.COLLABORATION)
+        return json(
+          {
+            error:
+              "Live updates are unavailable; the board will keep checking for changes.",
+          },
+          503,
+        );
+      const identity = await authorizeLive(request, env);
+      const headers = new Headers(request.headers);
+      headers.set("X-Live-Identity", JSON.stringify(identity));
+      return env.COLLABORATION.get(
+        env.COLLABORATION.idFromName("workspace"),
+      ).fetch(new Request(request.url, { headers }));
+    }
+    if (path === "/api/activity" && request.method === "GET") {
+      const state = await loadState(env);
       return json({
-        state: workspace(await loadState(env), user),
+        activity: (state.history || [])
+          .filter(
+            (entry) =>
+              entry.termId === url.searchParams.get("termId") ||
+              entry.termIds?.includes(url.searchParams.get("termId")),
+          )
+          .slice(-60)
+          .reverse()
+          .map(({ id, at, author, summary, version }) => ({
+            id,
+            at,
+            author,
+            summary,
+            version,
+          })),
+      });
+    }
+    if (path === "/api/state" && request.method === "GET") {
+      const metadata = {
         user: publicUser(user),
         csrf: user.csrf,
         local: localRequest(request, env),
         privateSheets: !!env.GOOGLE_SERVICE_ACCOUNT_JSON,
+      };
+      if (
+        url.searchParams.get("since") !== null &&
+        url.searchParams.get("role") === user.role &&
+        Number(url.searchParams.get("since")) === (await stateVersion(env))
+      )
+        return json({
+          ...metadata,
+          unchanged: true,
+          version: Number(url.searchParams.get("since")),
+        });
+      if (
+        url.searchParams.get("role") === user.role &&
+        url.searchParams.has("since")
+      ) {
+        const patch = await changesSince(
+          env,
+          Number(url.searchParams.get("since")),
+          user,
+        );
+        if (patch) return json({ ...metadata, patch });
+      }
+      return json({
+        state: workspace(await loadState(env), user),
+        ...metadata,
       });
+    }
     if (path === "/api/export" && request.method === "GET") {
       requireRole(user, ["administrator"]);
-      const response = json(await loadState(env));
+      const exported = await loadState(env);
+      for (const key of ["storageFormat", "termIds", "commitId", "operations"])
+        delete exported[key];
+      const response = json(exported);
       response.headers.set(
         "Content-Disposition",
         'attachment; filename="ouems-open-decks-backup.json"',
@@ -144,6 +308,12 @@ export async function handleApi(request, env, ctx) {
     if (path === "/api/auth/logout" || path === "/api/auth/password") {
       if (path.endsWith("password")) await changePassword(env, user, input);
       else await signOut(request, env);
+      await publish(
+        env,
+        path.endsWith("password")
+          ? { type: "revoke", userId: user.id }
+          : { type: "revoke", sessionHash: user.sessionHash },
+      );
       const response = json({ ok: true });
       response.headers.set("Set-Cookie", sessionCookie(request, env));
       return response;
@@ -152,6 +322,7 @@ export async function handleApi(request, env, ctx) {
       requireRole(user, ["administrator"]);
       if (path === "/api/admin/users") {
         const account = await manageUser(env, user, input);
+        await publish(env, { type: "revoke", userId: account.id });
         await mutate(env, (state) =>
           audit(
             state,
@@ -164,13 +335,41 @@ export async function handleApi(request, env, ctx) {
       if (!Number.isInteger(input.version))
         throw new Error("Missing board version. Refresh and try again.");
       const initial = await loadState(env);
+      const options = mutationOptions(input, user, path);
+      const receipt =
+        options.operation &&
+        initial.operations?.find(
+          (entry) =>
+            entry.id === options.operation.id && entry.userId === user.id,
+        );
+      if (receipt) {
+        if (receipt.fingerprint !== options.operation.fingerprint)
+          throw fail(
+            "This save identifier was already used for a different change.",
+            409,
+          );
+        return json(
+          {
+            state: workspace(initial, user),
+            result: receipt.result,
+            replayed: true,
+          },
+          path === "/api/admin/snapshots" ? 201 : 200,
+        );
+      }
       if (initial.version !== input.version)
         throw fail(
           "The board changed. Refresh before saving or restoring a state.",
           409,
         );
       if (path === "/api/admin/snapshots") {
-        await saveSnapshot(env, initial, input.name, author);
+        await saveSnapshot(
+          env,
+          initial,
+          input.name,
+          author,
+          snapshotId(user, input, "snapshot"),
+        );
         const out = await mutate(
           env,
           (state) =>
@@ -179,7 +378,7 @@ export async function handleApi(request, env, ctx) {
               author,
               `Saved state: ${String(input.name).slice(0, 100)}`,
             ),
-          input.version,
+          options,
         );
         return json({ ...out, state: workspace(out.state, user) }, 201);
       }
@@ -191,15 +390,19 @@ export async function handleApi(request, env, ctx) {
           initial,
           `Before restoring ${saved.name}`.slice(0, 100),
           author,
+          snapshotId(user, input, "restore"),
         );
         const out = await mutate(
           env,
           (state) => {
             const before = structuredClone(state.terms);
             state.terms = structuredClone(saved.data.terms);
-            audit(state, author, `Restored state: ${saved.name}`, before);
+            state.epoch = (state.epoch || 0) + 1;
+            audit(state, author, `Restored state: ${saved.name}`, before, [
+              ...new Set([...before, ...state.terms].map((term) => term.id)),
+            ]);
           },
-          input.version,
+          mutationOptions(input, user, path),
         );
         return json({ ...out, state: workspace(out.state, user) });
       }
@@ -231,10 +434,16 @@ export async function handleApi(request, env, ctx) {
               "An Open Decks board already exists for this term.",
             );
           state.terms.push(term);
-          audit(state, author, `Created Open Decks ${term.code}`);
+          audit(
+            state,
+            author,
+            `Created Open Decks ${term.code}`,
+            null,
+            term.id,
+          );
           return { termId: term.id };
         },
-        input.version,
+        mutationOptions(input, user, path),
       );
       return json({ ...out, state: workspace(out.state, user) }, 201);
     }
@@ -260,7 +469,13 @@ export async function handleApi(request, env, ctx) {
                 term.instances.find((i) => i.id === input.instanceId)
                   ?.profileId,
           );
-          applyAction(state, input, author);
+          applyAction(
+            state,
+            input,
+            author,
+            input.operationId ? setIds(user.id, input.operationId) : undefined,
+          );
+          if (equal(before, state.terms)) return;
           if (destructive)
             await saveSnapshot(
               env,
@@ -270,15 +485,17 @@ export async function handleApi(request, env, ctx) {
                 100,
               ),
               author,
+              snapshotId(user, input, "deletion"),
             );
           audit(
             state,
             author,
-            `${input.type}: ${profile?.name || (night && input.type === "delete-night" ? `${term.code} ${night.date}` : term?.code) || "board"}`,
+            actionSummary(input, profile, night, term),
             before,
+            input.termId,
           );
         },
-        input.version,
+        mutationOptions(input, user, path),
       );
       return json({ ...out, state: workspace(out.state, user) });
     }
@@ -295,12 +512,13 @@ export async function handleApi(request, env, ctx) {
         rows = input.rows || (await readSheet(term.sheetUrl, env));
       } catch (e) {
         await mutate(env, (state) => {
-          state.terms.find((t) => t.id === term.id).importError = e.message;
+          const current = state.terms.find((t) => t.id === term.id);
+          if (current) current.importError = e.message;
         });
         throw e;
       }
       const out = await mutate(env, (state) => {
-        const result = importRows(
+        const result = appendResponses(
           state.terms.find((t) => t.id === term.id),
           rows,
         );
@@ -309,6 +527,8 @@ export async function handleApi(request, env, ctx) {
             state,
             author,
             `Imported ${result.added} DJs into ${term.code}`,
+            null,
+            term.id,
           );
         return result;
       });
@@ -317,8 +537,14 @@ export async function handleApi(request, env, ctx) {
     return json({ error: "Endpoint not found." }, 404);
   } catch (e) {
     return json(
-      { error: e.message || "Something went wrong." },
-      e.status || 400,
+      {
+        error: e.message || "Something went wrong.",
+        ...(e.conflicts ? { conflicts: e.conflicts } : {}),
+      },
+      e.status ||
+        (/D1_ERROR:.*(?:overloaded|busy|locked)/i.test(e.message || "")
+          ? 503
+          : 400),
     );
   }
 }
@@ -328,7 +554,7 @@ export async function importAll(env) {
     try {
       const rows = await readSheet(term.sheetUrl, env);
       await mutate(env, (state) => {
-        const result = importRows(
+        const result = appendResponses(
           state.terms.find((t) => t.id === term.id),
           rows,
         );
@@ -337,6 +563,8 @@ export async function importAll(env) {
             state,
             "Automatic import",
             `Imported ${result.added} DJs into ${term.code}`,
+            null,
+            term.id,
           );
         return result;
       });

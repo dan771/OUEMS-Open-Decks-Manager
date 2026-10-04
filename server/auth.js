@@ -123,7 +123,12 @@ export async function authenticate(request, env) {
   const user =
     session && data.users.find((u) => u.id === session.userId && !u.disabled);
   if (!user) throw fail("Your session has ended. Please sign in again.", 401);
-  return { ...publicUser(user), csrf: session.csrf };
+  return {
+    ...publicUser(user),
+    csrf: session.csrf,
+    sessionHash: session.hash,
+    sessionExpires: session.expires,
+  };
 }
 export function requireRole(user, roles) {
   if (!roles.includes(user.role))

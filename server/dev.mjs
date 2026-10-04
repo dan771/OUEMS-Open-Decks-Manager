@@ -6,6 +6,8 @@ import { handleApi, importAll } from "./api.js";
 import { demoState } from "./demo.js";
 import { emptySecurity } from "./auth.js";
 import { guardPage, securityHeaders } from "./access.js";
+import { WebSocketServer } from "ws";
+import { CollaborationHub, authorizeLive } from "./realtime.js";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const local = path.join(root, ".local");
 await mkdir(local, { recursive: true });
@@ -155,6 +157,50 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(500);
     res.end("Local server error");
     console.error(e.message);
+  }
+});
+const sockets = new Set();
+const room = new CollaborationHub({ getWebSockets: () => [...sockets] }, env);
+env.LIVE = room;
+const liveServer = new WebSocketServer({
+  noServer: true,
+  maxPayload: 2048,
+  handleProtocols: (protocols) =>
+    protocols.has("ouems-live") ? "ouems-live" : false,
+});
+server.on("upgrade", async (req, socket, head) => {
+  try {
+    const request = new Request(
+      new URL(req.url, `http://${req.headers.host}`),
+      { headers: req.headers },
+    );
+    if (new URL(request.url).pathname !== "/api/live")
+      throw new Error("Unknown live endpoint");
+    const identity = await authorizeLive(request, env);
+    if (sockets.size >= 1000) throw new Error("Too many connections");
+    liveServer.handleUpgrade(req, socket, head, (ws) => {
+      let attachment;
+      ws.serializeAttachment = (value) => {
+        attachment = structuredClone(value);
+      };
+      ws.deserializeAttachment = () => structuredClone(attachment);
+      sockets.add(ws);
+      room.attach(ws, identity);
+      ws.on("message", (data, binary) =>
+        room
+          .webSocketMessage(ws, binary ? data : data.toString())
+          .catch(() => ws.close(1011, "Reconnect to the board")),
+      );
+      ws.on("close", () => {
+        sockets.delete(ws);
+        room.webSocketClose();
+      });
+      ws.on("error", () => room.webSocketError(ws));
+    });
+  } catch (error) {
+    socket.end(
+      `HTTP/1.1 ${error.status || 400} Rejected\r\nConnection: close\r\n\r\n`,
+    );
   }
 });
 server.listen(Number(process.env.PORT || 8787), "127.0.0.1", () =>

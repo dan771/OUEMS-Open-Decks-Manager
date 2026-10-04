@@ -1,5 +1,6 @@
 import { handleApi, importAll } from "./server/api.js";
 import { guardPage, securityHeaders } from "./server/access.js";
+export { CollaborationHub } from "./server/realtime.js";
 export default {
   async fetch(request, env, ctx) {
     if (new URL(request.url).pathname.startsWith("/api/"))

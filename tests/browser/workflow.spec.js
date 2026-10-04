@@ -226,6 +226,9 @@ test("a concurrent edit keeps unsaved inputs and offers review of the latest sav
 }) => {
   await page.goto("/");
   await page.locator("#term-select").selectOption({ label: "MT26 · demo" });
+  const initialCount = await page
+    .getByRole("button", { name: "Edit Night Shift", exact: true })
+    .count();
   await page
     .getByRole("button", { name: "Edit Night Shift", exact: true })
     .first()
@@ -260,7 +263,7 @@ test("a concurrent edit keeps unsaved inputs and offers review of the latest sav
   await page.getByRole("button", { name: "Close dialog", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Edit Another organiser", exact: true }),
-  ).toHaveCount(2);
+  ).toHaveCount(initialCount);
 });
 
 test("early/late availability, override moves, collapse and ten compact DJs without scrolling", async ({

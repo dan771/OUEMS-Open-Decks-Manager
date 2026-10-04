@@ -12,6 +12,115 @@ async function loginPage(page, username, password) {
   ).toBeVisible();
 }
 
+test("Late drops leave Early gaps intact and set timings can be cleared and replanned", async ({
+  page,
+}) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let { state } = await (await page.request.get("/api/state")).json();
+  const rows = [
+    sheet[0],
+    ...["Gap Opener", "Gap Closer", "Gap Arrival"].map((name, index) => {
+      const row = [...sheet[1]];
+      row[0] = `gap-planning-${index}`;
+      row[2] = name;
+      return row;
+    }),
+  ];
+  const created = await page.request.post("/api/terms", {
+    headers: { Origin: "http://localhost:8790" },
+    data: { code: "MT36", rows, version: state.version },
+  });
+  expect(created.status()).toBe(201);
+  ({ state } = await created.json());
+  const term = state.terms.at(-1);
+  const nightId = term.nights[0].id;
+  const [opener, closer, arrival] = term.instances;
+  for (const action of [
+    { type: "configure", start: "18:00", end: "00:00", setLength: 45 },
+    { type: "move", instanceId: opener.id, period: "early" },
+    { type: "move", instanceId: closer.id, period: "late" },
+    {
+      type: "plan",
+      sets: [
+        { instanceIds: [opener.id], duration: 135 },
+        { instanceIds: [], duration: 45 },
+        { instanceIds: [closer.id], duration: 45 },
+      ],
+    },
+  ]) {
+    const saved = await page.request.post("/api/action", {
+      headers: { Origin: "http://localhost:8790" },
+      data: { ...action, termId: term.id, nightId, version: state.version },
+    });
+    expect(saved.status()).toBe(200);
+    ({ state } = await saved.json());
+  }
+  await page.goto("/");
+  await page.locator("#term-select").selectOption(term.id);
+  const night = page.locator(`[data-night-column="${nightId}"]`);
+  const early = night.locator('.period-list[data-period="early"]');
+  const late = night.locator('.period-list[data-period="late"]');
+  const earlyGap = early.locator('.empty-set[data-slot="1"]');
+  await expect(earlyGap).toContainText("20:15–21:00");
+  await page
+    .locator(`[data-instance="${arrival.id}"]`)
+    .dragTo(late.locator(".period-heading"));
+  await expect(late.locator(`[data-instance="${arrival.id}"]`)).toBeVisible();
+  await expect(late.locator('.scheduled-set[data-slot="3"]')).toContainText(
+    "21:45–22:30",
+  );
+  await expect(earlyGap).toBeVisible();
+  await night
+    .getByRole("button", { name: "Remove Gap Opener from night", exact: true })
+    .click();
+  await expect(early.locator('.empty-set[data-slot="0"]')).toBeVisible();
+  await expect(late.locator('.scheduled-set[data-slot="2"]')).toContainText(
+    "21:00–21:45",
+  );
+  await page.reload();
+  await expect(earlyGap).toBeVisible();
+  await expect(late.locator('.scheduled-set[data-slot="3"]')).toContainText(
+    "Gap Arrival",
+  );
+  await night.getByRole("button", { name: "Plan sets", exact: true }).click();
+  await expect(
+    page.locator(".plan-row").filter({ hasText: "Open slot" }),
+  ).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Add empty slot", exact: true })
+    .click();
+  await expect(
+    page.locator(".plan-row").filter({ hasText: "Open slot" }),
+  ).toHaveCount(3);
+  await page
+    .getByRole("button", { name: "Save set plan", exact: true })
+    .click();
+  await expect(late.locator('.empty-set[data-slot="4"]')).toContainText(
+    "22:30–23:15",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await night.getByRole("button", { name: "Plan sets", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Clear set timings", exact: true })
+    .click();
+  await expect(page.locator("#dialog")).not.toBeVisible();
+  await expect(night.locator(".scheduled-set, .empty-set")).toHaveCount(0);
+  await expect(late.locator(".dj-card")).toHaveCount(2);
+  await expect(late).not.toContainText("21:00–21:45");
+  await page.reload();
+  await expect(late.locator(".dj-card")).toHaveCount(2);
+  await night.getByRole("button", { name: "Plan sets", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Clear set timings", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Save set plan", exact: true })
+    .click();
+  await expect(late.locator(".scheduled-set")).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
 test("named venues, inline set planning, B2B, individual durations and one-click removal work on desktop and mobile", async ({
   page,
 }) => {

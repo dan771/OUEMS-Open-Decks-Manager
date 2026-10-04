@@ -8,6 +8,8 @@ import {
   importRows,
   applyAction,
   generateSlots,
+  planningSlots,
+  automaticPlan,
   availabilityFor,
   preferredPeriods,
   periodBounds,
@@ -623,8 +625,145 @@ test("set plans validate membership, support B2B, ordering and a manual closing 
     instanceId: partner.id,
     nightId: null,
   });
-  assert.equal(night.plan.length, 1);
-  assert.equal(closer.slot, 0);
+  assert.equal(night.plan.length, 2);
+  assert.deepEqual(night.plan[0].instanceIds, []);
+  assert.equal(closer.slot, 1);
+  assert.deepEqual(generateSlots(night)[closer.slot], {
+    start: 1500,
+    end: 1560,
+  });
+});
+
+test("planned gaps stay free when moving into Late, swapping, removing and clearing timings", () => {
+  const { state, term, instance } = setup();
+  const night = term.nights[0];
+  Object.assign(night, { start: "18:00", end: "00:00", setLength: 45 });
+  const act = (type, data = {}) =>
+    applyAction(state, {
+      type,
+      termId: term.id,
+      nightId: night.id,
+      instanceId: instance.id,
+      ...data,
+    });
+  act("move", { period: "early" });
+  for (const name of ["Early DJ", "Late DJ", "Extra Late DJ"])
+    act("add", { fields: { name }, period: "early" });
+  const [first, early, late, extra] = term.instances;
+  act("move", { instanceId: extra.id, nightId: null });
+  act("plan", {
+    sets: [
+      { instanceIds: [first.id, early.id], duration: 135 },
+      { instanceIds: [], duration: 45 },
+      { instanceIds: [late.id], duration: 45 },
+    ],
+  });
+  act("confirm", { instanceId: late.id, confirmed: true });
+  act("move", { instanceId: extra.id, period: "late", slot: null });
+  assert.equal(extra.slot, 3);
+  assert.deepEqual(generateSlots(night)[extra.slot], {
+    start: 1305,
+    end: 1350,
+  });
+  assert.deepEqual(night.plan[1].instanceIds, []);
+  // Swapping with a B2B member preserves the partner and both times.
+  act("move", { instanceId: extra.id, slot: 0 });
+  assert.deepEqual(night.plan[0].instanceIds, [extra.id, early.id]);
+  assert.equal(first.slot, 3);
+  act("move", { instanceId: extra.id, nightId: null });
+  assert.deepEqual(night.plan[0].instanceIds, [early.id]);
+  act("move", { instanceId: early.id, nightId: null });
+  assert.deepEqual(night.plan[0].instanceIds, []);
+  assert.equal(late.slot, 2);
+  assert.deepEqual(generateSlots(night)[late.slot], { start: 1260, end: 1305 });
+  assert.equal(late.confirmed, true);
+  assert.deepEqual(planningSlots(night).at(-1), { start: 1395, end: 1440 });
+  act("clear-plan");
+  assert.equal(night.plan, undefined);
+  for (const card of [late, first]) {
+    assert.equal(card.nightId, night.id);
+    assert.equal(card.period, "late");
+    assert.equal(card.slot, null);
+  }
+  assert.equal(late.confirmed, true);
+  assert.equal(term.instances.length, 4);
+  const draft = automaticPlan(term, night);
+  assert.equal(draft.filter((s) => !s.instanceIds.length).length, 4);
+  act("plan", { sets: draft });
+  assert.equal(instancePeriod(term, late), "late");
+  assert.equal(instancePeriod(term, first), "late");
+  assert.throws(
+    () => act("clear-plan", { nightId: "missing" }),
+    /Night not found/,
+  );
+});
+
+test("full Late halves keep new cards untimed; short overnight boundary gaps stay free", () => {
+  const { state, term, instance } = setup();
+  const night = term.nights[0];
+  Object.assign(night, {
+    start: "23:00",
+    end: "02:00",
+    splitTime: "00:05",
+    setLength: 30,
+  });
+  instance.nightId = night.id;
+  instance.period = "late";
+  const draft = automaticPlan(term, night);
+  assert.deepEqual(
+    draft.map((set) => set.duration),
+    [30, 30, 5, 30],
+  );
+  applyAction(state, {
+    type: "plan",
+    termId: term.id,
+    nightId: night.id,
+    sets: draft,
+  });
+  assert.deepEqual(generateSlots(night)[instance.slot], {
+    start: 1445,
+    end: 1475,
+  });
+  assert.throws(() => automaticPlan(term, night, 0), /set length/);
+  assert.throws(
+    () =>
+      applyAction(state, {
+        type: "move",
+        termId: term.id,
+        instanceId: instance.id,
+        nightId: night.id,
+        slot: 2,
+      }),
+    /10 and 240/,
+  );
+  // A complete Late half has no vacancy, and must not consume the Early gaps.
+  draft.at(-1).duration = 115;
+  applyAction(state, {
+    type: "plan",
+    termId: term.id,
+    nightId: night.id,
+    sets: draft,
+  });
+  applyAction(state, {
+    type: "add",
+    termId: term.id,
+    fields: { name: "Unscheduled Late" },
+  });
+  const late = term.instances.at(-1);
+  applyAction(state, {
+    type: "move",
+    termId: term.id,
+    instanceId: late.id,
+    nightId: night.id,
+    period: "late",
+  });
+  assert.equal(late.period, "late");
+  assert.equal(late.slot, null);
+  assert.equal(instance.slot, 3);
+  assert.deepEqual(
+    night.plan.slice(0, 3).map((set) => set.instanceIds),
+    [[], [], []],
+  );
 });
 
 test("adding a named venue night preserves old placements and starts availability as unknown", () => {

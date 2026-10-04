@@ -26,6 +26,7 @@ export async function guardPage(request, env) {
   }
 }
 export function securityHeaders(response) {
+  if (response.status === 101) return response;
   const secured = new Response(response.body, response);
   const headers = {
     "Cache-Control": "no-store",

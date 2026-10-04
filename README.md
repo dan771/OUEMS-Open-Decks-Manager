@@ -4,7 +4,7 @@ A shared planning app for Oxford termly Open Decks with Administrator, Manager a
 
 ## Try it locally
 
-Install Node.js 22 or later, then run:
+Install Node.js 22.13 or later, then run:
 
 ```sh
 npm ci
@@ -17,7 +17,7 @@ On first launch, create your **Administrator** account. There are no default cre
 
 Local boards persist in `.local/state.json`, accounts/hashed sessions in `.local/auth-state.json`, and saved states in `.local/snapshots-state.json`. These files are ignored by Git and never served as assets. Stop the server before `npm run demo:reset`; it backs up the previous board and keeps your accounts. Browser tests use separate files and never modify your workspace.
 
-The local server is dependency-free. Wrangler, Playwright and Prettier are development/deployment tools, not production services. All website fonts and artwork are served with the app.
+The local server uses Node.js and the small `ws` WebSocket library. Wrangler, Playwright and Prettier are development/deployment tools, not production services. All website fonts and artwork are served with the app.
 
 ## Using the app
 
@@ -28,7 +28,7 @@ The local server is dependency-free. Wrangler, Playwright and Prettier are devel
 5. Each night shows its **venue name** in place of Night 01 and has collapsible **Early** and **Late** lists. Drag into either list or use Add/Move. **Plan sets** orders all assigned DJs with arrow controls, pairs two different DJs into a B2B, and edits individual durations, including a 60-minute closer. Fill night equally divides available time among sets; Use …-minute sets restores the configured default. Saved ordering and times appear directly in Early/Late, with no separate planner dropdown. A set belongs to the half in which it starts. Dropping onto an occupied set swaps a DJ placement. The × on an assigned card returns it to Unassigned; its B2B partner stays scheduled.
 6. **Configure** sets the venue, start/end, default set length and optional Early/Late split. With automatic timing checked, all assigned DJs receive consecutive sets using that length; B2B pairs stay together. Uncheck it to retain custom durations. Overnight schedules are supported, and plans cannot exceed the night's end. **Add a night** creates another date with its own venue and timings. On board creation, enter the initial venue before previewing your response source.
 7. **Add a DJ to this night** lets you choose Early or Late and moves an existing card there; it does not duplicate it. For another appearance, explicitly **Duplicate** a card. Use the same Add picker or the card's Move control on touch devices and with a keyboard. **Compact mode** keeps names, genres, experience labels, vinyl and comment indicators in short rows: ten DJs fit in one night without vertical scrolling at a 1280×768 desktop viewport with untimed cards. Compact mode and collapsed lists are remembered on this browser.
-8. Linked Sheets are checked every five minutes, including while nobody has the app open. **Check responses** also imports immediately. Shared board changes are picked up every 20 seconds while the page is visible. CSV boards require manual CSV uploads for additional responses.
+8. Linked Sheets are checked every five minutes, including while nobody has the app open. **Check responses** also imports immediately. Shared changes arrive immediately over an authenticated live connection. The board shows other organisers and highlights DJs being edited. After disconnecting, it reconnects automatically and checks for missed changes; a three-second fallback keeps visible pages current if live updates are unavailable. Unchanged Sheet checks do not create board revisions. CSV boards require manual CSV uploads for additional responses.
 9. The download icon exports the complete workspace, including initial responses, edits, comments and placements. Keep periodic backups; the source Sheet contains only the original submissions.
 
 Profiles also have optional **Ethnicity** and **Gender** text fields, matched from form columns or entered when adding/editing a DJ. Existing matching form answers populate these fields. Search matches names, genres, ethnicity and gender in both the board and Add picker. The **Genres / Ethnicity & gender** toolbar toggle changes the details shown on cards in either density and remembers your choice on this browser; search always checks all fields. On phones the demographic view is labelled **E/G**.
@@ -45,7 +45,11 @@ Importing is append-only. Existing profiles, initial responses and placements ar
 
 Profile fields and edited transcript answers are separate: correcting the transcript does not silently reclassify a profile you have already curated. Revert restores both. All raw questions are retained, including contact and demographic answers; access should be limited to your organisers.
 
-The database uses a version check on every shared save. A stale edit is rejected instead of silently overwriting another user. The dialog retains unsaved inputs and offers **Review latest DJ** to reopen the current saved profile.
+Independent edits merge automatically: different DJs, different profile fields, availability values and individual transcript answers can save together. Comments append safely alongside edits. Moves check the source placement, destination set and schedule they depend on; competing moves or schedule edits are rejected. A same-field conflict keeps your draft and shows both your value and the latest saved value, with **Keep my value** and **Use latest value** choices. **Review latest DJ** explicitly discards the current form and reopens the saved profile.
+
+Dragging, removing and confirming cards updates the board immediately and saves actions in order. You can make several moves while an earlier save is still pending. Pending cards have a gold edge, and the status reports how many changes still need saving. **Pending saves** shows the intended changes and the saved placements; retry a failed connection, explicitly apply reviewed conflicts, or discard the pending actions. Offline moves and confirmations are kept in the tab and retry on reconnect. After a reload, review the recovered queue and choose **Retry saves**. Form saves wait until queued board changes finish. A local preview does not mean the server has saved it.
+
+Unsaved profile drafts survive reloads in the same browser tab; reopen the DJ and choose **Restore draft** or **Discard draft**. Unsent comments reopen in the composer. Failed save identifiers also survive reloads, so retrying a comment after losing its reply uses the original identifier. Tab recovery data expires after one day and is cleared on sign-out, session expiry and role changes. Recent **Activity** includes creation, edits, imports and restores, updates while open, and omits private form answers and comment bodies from viewer responses. Live connections check their health and reconnect when acknowledgements stop; presence rosters are only broadcast when they change.
 
 ## Accounts, security and history
 
@@ -71,14 +75,14 @@ Export downloads boards and retained history. Accounts, hashes, sessions and sav
 
 Storage is designed for a small workspace. Password hashing adds deliberate computation cost; do not assume Workers Free's 10 ms CPU budget supports login/account operations. Validate your target hosting plan or use one with sufficient CPU. All static application requests now pass through the Worker to enforce login. No hosting plan is changed by this repository. See [Workers CPU limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time) and [authenticated asset routing](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/). The platform allowances below remain useful for planning:
 
-| Resource                | Free allowance                         | Use here                         |
-| ----------------------- | -------------------------------------- | -------------------------------- |
-| Static website requests | Subject to Worker invocation allowance | Login checks run before assets   |
-| Worker requests         | 100,000/day                            | Board reads, edits and imports   |
-| D1 reads                | 5 million rows/day                     | One workspace document per read  |
-| D1 writes               | 100,000 rows/day                       | One workspace document per save  |
-| D1 total storage        | 5 GB                                   | Form responses and planning data |
-| Cloudflare Access       | Up to 50 users on Free                 | Your 2–3 organisers              |
+| Resource                | Free allowance                         | Use here                               |
+| ----------------------- | -------------------------------------- | -------------------------------------- |
+| Static website requests | Subject to Worker invocation allowance | Login checks run before assets         |
+| Worker requests         | 100,000/day                            | Board reads, edits and imports         |
+| D1 reads                | 5 million rows/day                     | Version checks and changed entities    |
+| D1 writes               | 100,000 rows/day                       | Changed entities, indexes and metadata |
+| D1 total storage        | 5 GB                                   | Form responses and planning data       |
+| Cloudflare Access       | Up to 50 users on Free                 | Your 2–3 organisers                    |
 
 Platform allowances: [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [D1](https://developers.cloudflare.com/d1/platform/pricing/), [Access](https://www.cloudflare.com/sase/products/access/). Domain registration is separate. This repository has not been deployed to your Cloudflare account.
 
@@ -93,7 +97,7 @@ Platform allowances: [Workers](https://developers.cloudflare.com/workers/platfor
 
 2. Put the returned database ID into `wrangler.jsonc` in place of `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
 
-3. Apply both database migrations (including `0002_auth_history.sql`), configure a random administrator setup key of at least 32 characters, and deploy:
+3. Apply all database migrations (including `0003_collaborative_entities.sql`), configure a random administrator setup key of at least 32 characters, and deploy:
 
    ```sh
    npx wrangler d1 migrations apply ouems-open-decks --remote
@@ -146,6 +150,8 @@ Browser tests default to installed Microsoft Edge on Windows. Set `PLAYWRIGHT_CH
 
 See [TESTING.md](TESTING.md) for the acceptance scenarios. The domain tests cover dates, field classification, import deduplication, shared profiles, scheduling and revert. API tests cover authentication, cross-origin requests, save collisions, private-Sheet reads and import failures. Browser tests cover desktop and mobile workflows. `scripts/inspect-example.mjs PATH_TO_CSV` checks a real CSV and prints aggregate counts only.
 
-The small-workspace storage model is deliberately simple: D1 holds one JSON document with an atomic version counter; instances reference shared profile IDs. This implementation caps the entire workspace at 1.9 MB to stay within D1's [2 MB row limit](https://developers.cloudflare.com/d1/platform/limits/). That is ample for the intended small dataset; long-term accumulation may need old terms archived by an administrator or entities split into separate tables. Backups are JSON exports. In-app restoration uses up to five named snapshots, stored in separate D1 rows capped at 1.9 MB each. Accounts occupy a separate versioned row, and session/rate-limit/history storage is bounded.
+D1 stores boards, profiles, card appearances and nights in separate rows. A save writes only changed entities and commits them atomically with the workspace revision. Migration `0003_collaborative_entities.sql` preserves existing data; legacy workspace JSON moves into entity rows on the first successful save. Conditional reads return no workspace payload when unchanged, and production incremental reads transfer only changed entities, including removals, with the same role filtering as initial loads. The global revision coordinates durable commits; field and placement checks determine whether an individual edit conflicts. The former 1.9 MB limit on the entire workspace is removed. Each individual entry remains capped at 1.9 MB to fit D1's [2 MB row limit](https://developers.cloudflare.com/d1/platform/limits/). Saved states are split into chunks when needed, with the latest five retained. Exports remain complete JSON backups.
+
+The Worker uses an authenticated hibernating Durable Object for live notifications and board presence. Its binding and class migration are included in `wrangler.jsonc`; deploy that configuration together with the code. Live sockets never carry form responses, passwords or session tokens. Origin and session CSRF checks protect upgrades, account/session revocations close affected connections, and expiry is checked during presence updates. A disconnected live channel cannot roll back a durable save. Destructive board/night deletions and workspace restores deliberately retain strict workspace revision checks and safety copies.
 
 The final deployment still needs your Cloudflare account, D1 ID, chosen hostname, administrator setup secret, suitable CPU allowance and Google service-account key. The local demo and automated tests do not require these credentials.

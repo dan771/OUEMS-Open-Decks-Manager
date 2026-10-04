@@ -152,6 +152,9 @@ test("filters, saved-state controls and account menu fit and align across viewpo
     { width: 1280, height: 768 },
     { width: 945, height: 768 },
     { width: 768, height: 768 },
+    { width: 600, height: 800 },
+    { width: 514, height: 784 },
+    { width: 451, height: 768 },
     { width: 390, height: 844 },
     { width: 320, height: 667 },
   ]) {
@@ -187,8 +190,47 @@ test("filters, saved-state controls and account menu fit and align across viewpo
       await page
         .getByRole("button", { name: "Compact mode", exact: true })
         .click();
-    for (const width of [1540, 1280, 945, 768, 390, 320]) {
+    for (const width of [
+      1540, 1280, 945, 801, 800, 768, 600, 514, 451, 450, 390, 320,
+    ]) {
       await page.setViewportSize({ width, height: 900 });
+      const header = await page.locator(".topbar").evaluate((element) => {
+        const bar = element.getBoundingClientRect();
+        const brand = element.querySelector(".brand").getBoundingClientRect();
+        const controls = [
+          ...element.querySelectorAll(
+            "#term-select, [data-action='create'], .avatar",
+          ),
+        ].map((control) => control.getBoundingClientRect());
+        const filters = document
+          .querySelector(".toolbar")
+          .getBoundingClientRect();
+        return {
+          inHeader: [brand, ...controls].every(
+            (rect) =>
+              rect.top >= bar.top &&
+              rect.bottom <= bar.bottom &&
+              rect.left >= 0 &&
+              rect.right <= innerWidth,
+          ),
+          separate:
+            brand.right <= controls[0].left &&
+            controls.every(
+              (rect, index) =>
+                index === 0 || controls[index - 1].right <= rect.left,
+            ),
+          sameRow: controls.every(
+            (rect) => Math.abs(rect.top - controls[0].top) <= 1,
+          ),
+          aboveFilters: bar.bottom <= filters.top,
+        };
+      });
+      expect(header, JSON.stringify({ width, compact })).toEqual({
+        inHeader: true,
+        separate: true,
+        sameRow: true,
+        aboveFilters: true,
+      });
       const bounds = await page.locator(".filters").evaluate((element) => {
         const controls = [...element.querySelectorAll("input, select")].map(
           (control) => control.getBoundingClientRect(),
@@ -233,7 +275,7 @@ test("filters, saved-state controls and account menu fit and align across viewpo
       await page.keyboard.press("Escape");
       await expect(trigger).toBeFocused();
       await expect(trigger).toHaveAttribute("aria-expanded", "false");
-      if (width === 1280 || width === 390) {
+      if (width === 1280 || width === 514 || width === 451 || width === 390) {
         await page.screenshot({
           path: `test-results/board-aligned-${compact ? "compact" : "regular"}-${width}.png`,
         });

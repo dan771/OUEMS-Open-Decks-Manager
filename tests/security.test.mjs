@@ -610,7 +610,7 @@ test("edit history records who and before/after; five states are retained and re
   assert.match(final.snapshots[0].name, /^Before restoring/);
   assert.match(final.history.at(-1).summary, /^Restored state/);
   assert.equal(
-    final.history.some((h) => h.summary.startsWith("edit:")),
+    final.history.some((h) => h.summary.startsWith("Updated ")),
     true,
   );
 });

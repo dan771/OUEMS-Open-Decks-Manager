@@ -19,5 +19,11 @@
     },
   ],
   "triggers": { "crons": ["*/5 * * * *"] },
+  "durable_objects": {
+    "bindings": [{ "name": "COLLABORATION", "class_name": "CollaborationHub" }],
+  },
+  "migrations": [
+    { "tag": "collaboration-v1", "new_sqlite_classes": ["CollaborationHub"] },
+  ],
   "observability": { "enabled": true },
 }

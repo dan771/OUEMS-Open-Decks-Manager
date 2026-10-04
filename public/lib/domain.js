@@ -218,7 +218,11 @@ export function generateSlots(night) {
     let cursor = start;
     return night.plan.map((set) => {
       const duration = Number(set.duration);
-      if (!Number.isInteger(duration) || duration < 10 || duration > 240)
+      if (
+        !Number.isInteger(duration) ||
+        duration < (set.instanceIds?.length === 0 ? 1 : 10) ||
+        duration > 240
+      )
         throw new Error("Each set must be between 10 and 240 minutes.");
       const slot = { start: cursor, end: cursor + duration };
       cursor += duration;
@@ -271,6 +275,21 @@ export function periodBounds(night) {
 }
 export function slotPeriod(night, slot) {
   return slot.start < periodBounds(night).late.start ? "early" : "late";
+}
+// Include the unused end of a saved plan as drop targets, without saving it yet.
+export function planningSlots(night) {
+  const slots = generateSlots(night);
+  if (!night.plan?.length) return slots;
+  const bounds = periodBounds(night);
+  for (let start = slots.at(-1).end; start < bounds.late.end;) {
+    const end = Math.min(
+      start + Number(night.setLength),
+      start < bounds.late.start ? bounds.late.start : bounds.late.end,
+    );
+    slots.push({ start, end });
+    start = end;
+  }
+  return slots;
 }
 export function preferredPeriods(profile, night) {
   const pref = profile.availability?.[night.date];
@@ -481,7 +500,7 @@ export function importRows(term, rows) {
   term.importError = null;
   return { added };
 }
-export function applyAction(state, action, author = "Team") {
+export function applyAction(state, action, author = "Team", createSetId = uid) {
   const term = state.terms.find((t) => t.id === action.termId);
   if (!term) throw new Error("Board not found.");
   const profile = term.profiles.find((p) => p.id === action.profileId);
@@ -539,8 +558,16 @@ export function applyAction(state, action, author = "Team") {
           const pref = f.availability[night.date];
           if (pref)
             profile.availability[night.date] = {
-              available: pref.available === null ? null : !!pref.available,
-              timing: clean(pref.timing).slice(0, 500),
+              available:
+                "available" in pref
+                  ? pref.available === null
+                    ? null
+                    : !!pref.available
+                  : (profile.availability[night.date]?.available ?? null),
+              timing:
+                "timing" in pref
+                  ? clean(pref.timing).slice(0, 500)
+                  : profile.availability[night.date]?.timing || "",
             };
         }
       if (action.transcript) {
@@ -553,6 +580,19 @@ export function applyAction(state, action, author = "Team") {
           question: profile.original.transcript[i].question,
           answer: clean(a.answer).slice(0, 10000),
         }));
+      }
+      if (action.answers) {
+        for (const [index, answer] of Object.entries(action.answers)) {
+          if (
+            !/^(0|[1-9][0-9]*)$/.test(index) ||
+            !profile.transcript[Number(index)]
+          )
+            throw new Error("Transcript fields do not match.");
+          profile.transcript[Number(index)].answer = clean(answer).slice(
+            0,
+            10000,
+          );
+        }
       }
       break;
     }
@@ -601,7 +641,7 @@ export function applyAction(state, action, author = "Team") {
         !["early", "late"].includes(action.period)
       )
         throw new Error("Choose Early or Late.");
-      const slot =
+      let slot =
         night && action.slot !== null && action.slot !== undefined
           ? Number(action.slot)
           : null;
@@ -609,9 +649,32 @@ export function applyAction(state, action, author = "Team") {
         slot !== null &&
         (!Number.isInteger(slot) ||
           slot < 0 ||
-          slot >= generateSlots(night).length)
+          slot >= planningSlots(night).length)
       )
         throw new Error("Set not found.");
+      if (night?.plan?.length) {
+        const slots = planningSlots(night);
+        // A half-level drop can only fill a vacancy in the requested half.
+        if (slot === null && action.period) {
+          const vacancy = slots.findIndex(
+            (s, index) =>
+              slotPeriod(night, s) === action.period &&
+              !night.plan[index]?.instanceIds.length &&
+              s.end - s.start >= 10,
+          );
+          if (vacancy >= 0) slot = vacancy;
+        }
+        if (slot !== null) {
+          for (let index = night.plan.length; index <= slot; index++) {
+            const duration = slots[index].end - slots[index].start;
+            if (index === slot && duration < 10)
+              throw new Error(
+                "This gap is too short for a set. Adjust the plan first.",
+              );
+            night.plan.push({ id: createSetId(), instanceIds: [], duration });
+          }
+        }
+      }
       const occupant =
         slot === null
           ? null
@@ -678,7 +741,6 @@ export function applyAction(state, action, author = "Team") {
       });
       for (const n of new Set([oldNight, night].filter(Boolean))) {
         if (n.plan) {
-          n.plan = n.plan.filter((s) => s.instanceIds.length);
           syncPlan(term, n);
         }
       }
@@ -704,7 +766,7 @@ export function applyAction(state, action, author = "Team") {
       };
       if (!next.venue) throw new Error("Enter a venue name.");
       if (action.autoTime === true || action.autoTime === "true") {
-        next.plan = automaticPlan(term, night, next.setLength);
+        next.plan = automaticPlan(term, next, next.setLength);
         generateSlots(next);
         periodBounds(next);
         Object.assign(night, next);
@@ -745,6 +807,16 @@ export function applyAction(state, action, author = "Team") {
         duration: Number(s.duration),
       }));
       syncPlan(term, night);
+      break;
+    }
+    case "clear-plan": {
+      const night = term.nights.find((n) => n.id === action.nightId);
+      if (!night) throw new Error("Night not found.");
+      for (const card of term.instances.filter((i) => i.nightId === night.id)) {
+        card.period = instancePeriod(term, card);
+        card.slot = null;
+      }
+      delete night.plan;
       break;
     }
     case "add-night": {
@@ -828,12 +900,19 @@ export function applyAction(state, action, author = "Team") {
   return state;
 }
 
-export function automaticPlan(term, night, duration = night.setLength) {
+export function automaticPlan(term, night, duration = null) {
+  const setDuration = Number(duration ?? night.setLength);
+  if (!Number.isInteger(setDuration) || setDuration < 10 || setDuration > 240)
+    throw new Error("Choose a set length between 10 and 240 minutes.");
+  const bounds = periodBounds(night);
   const cards = term.instances.filter((i) => i.nightId === night.id);
   const used = new Set();
   const result = (night.plan || []).map((s) => ({
     ...s,
-    duration: Number(duration),
+    duration:
+      duration !== null && s.instanceIds.length
+        ? setDuration
+        : Number(s.duration),
     instanceIds: [...s.instanceIds],
   }));
   for (const set of result) for (const id of set.instanceIds) used.add(id);
@@ -844,12 +923,41 @@ export function automaticPlan(term, night, duration = night.setLength) {
         (instancePeriod(term, i) === "late" ? 1000 : 0) + (i.slot ?? 500);
       return rank(a) - rank(b);
     });
-  for (const card of rest)
+  for (const card of rest) {
+    const period = instancePeriod(term, card);
+    let start = timeMinutes(night.start);
+    const slots = result.map((set) => {
+      const slot = { start, end: start + Number(set.duration) };
+      start = slot.end;
+      return slot;
+    });
+    const vacancy = result.findIndex(
+      (set, index) =>
+        !set.instanceIds.length &&
+        set.duration >= 10 &&
+        (slots[index].start < bounds.late.start ? "early" : "late") === period,
+    );
+    if (vacancy >= 0) {
+      result[vacancy].instanceIds.push(card.id);
+      continue;
+    }
+    const cursor = slots.at(-1)?.end ?? timeMinutes(night.start);
+    const gap = bounds.late.start - cursor;
+    if (period === "late" && gap > 0) {
+      // Preserve the unfilled Early half when timing Late DJs.
+      let remaining = gap;
+      while (remaining > 0) {
+        const length = Math.min(setDuration, remaining);
+        result.push({ id: uid(), instanceIds: [], duration: length });
+        remaining -= length;
+      }
+    }
     result.push({
       id: uid(),
       instanceIds: [card.id],
-      duration: Number(duration),
+      duration: setDuration,
     });
+  }
   return result;
 }
 export function validatePlan(term, night, sets) {
@@ -858,12 +966,8 @@ export function validatePlan(term, night, sets) {
   const assigned = term.instances.filter((i) => i.nightId === night.id);
   const used = new Set();
   for (const set of sets) {
-    if (
-      !Array.isArray(set.instanceIds) ||
-      set.instanceIds.length < 1 ||
-      set.instanceIds.length > 2
-    )
-      throw new Error("A set needs one DJ, or two for B2B.");
+    if (!Array.isArray(set.instanceIds) || set.instanceIds.length > 2)
+      throw new Error("A set can be empty, or have one DJ or two for B2B.");
     const profiles = new Set();
     for (const id of set.instanceIds) {
       const card = assigned.find((i) => i.id === id);

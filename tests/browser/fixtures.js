@@ -1,9 +1,16 @@
 import { test as base, expect } from "@playwright/test";
+let administratorCookies = [];
 export const test = base.extend({
   page: async ({ page, context }, use) => {
+    // Browser contexts keep their own storage and UI state. Reuse only the
+    // administrator session so a growing suite does not trip login throttles.
+    await context.addCookies(administratorCookies);
     const status = await (await page.request.get("/api/auth/status")).json();
     let csrf;
-    if (!status.initialized) {
+    const existing = await page.request.get("/api/state");
+    if (existing.ok()) {
+      ({ csrf } = await existing.json());
+    } else if (!status.initialized) {
       await page.goto("/login");
       await expect(
         page.getByRole("heading", {
@@ -40,6 +47,7 @@ export const test = base.extend({
       expect(signed.status()).toBe(200);
       ({ csrf } = await signed.json());
     }
+    administratorCookies = await context.cookies("http://localhost:8790");
     await context.setExtraHTTPHeaders({ "X-CSRF-Token": csrf });
     await use(page);
   },
