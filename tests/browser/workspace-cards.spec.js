@@ -34,6 +34,95 @@ async function boardView(page) {
   }));
 }
 
+for (const width of [390, 1280]) {
+  test(`card confirmations and edits preserve night scroll at ${width}px`, async ({
+    page,
+  }) => {
+    let { state, term } = await createBoard(
+      page,
+      width === 390 ? "MT41" : "MT42",
+      24,
+    );
+    const nightId = term.nights[0].id;
+    for (const instance of term.instances) {
+      const response = await page.request.post("/api/action", {
+        headers: { Origin: "http://localhost:8790" },
+        data: {
+          type: "move",
+          termId: term.id,
+          instanceId: instance.id,
+          nightId,
+          period: "early",
+          version: state.version,
+        },
+      });
+      expect(response.status()).toBe(200);
+      ({ state } = await response.json());
+    }
+    await page.setViewportSize({ width, height: 700 });
+    await page.goto("/");
+    await page.locator("#term-select").selectOption(term.id);
+    if (width === 390)
+      await page
+        .getByRole("button", { name: "Next night", exact: true })
+        .click();
+    const night = page.locator(`[data-night-column="${nightId}"]`);
+    const content = night.locator(".column-content");
+    for (const compact of [false, true]) {
+      if (compact)
+        await page
+          .getByRole("button", { name: "Compact mode", exact: true })
+          .click();
+      await content.evaluate((element) => {
+        element.scrollTop = 300;
+      });
+      const before = await content.evaluate((element) => element.scrollTop);
+      expect(before).toBeGreaterThan(200);
+      const instanceId = await content.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        return [...element.querySelectorAll(".dj-card")].find((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+        }).dataset.instance;
+      });
+      const card = night.locator(`[data-instance="${instanceId}"]`);
+      const confirm = card.locator(".card-confirmation");
+      const wasConfirmed = await confirm.getAttribute("aria-pressed");
+      const saved = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/action") &&
+          response.request().postDataJSON()?.type === "confirm",
+      );
+      await confirm.click();
+      expect((await saved).status()).toBe(200);
+      await expect(confirm).toHaveAttribute(
+        "aria-pressed",
+        wasConfirmed === "true" ? "false" : "true",
+      );
+      await expect
+        .poll(() => content.evaluate((element) => element.scrollTop))
+        .toBe(before);
+      await expect(night).toBeVisible();
+
+      await card.locator(".card-open").click();
+      const beforeEdit = await content.evaluate((element) => element.scrollTop);
+      await page
+        .locator('#edit-form [name="genres"]')
+        .fill(compact ? "Compact scroll edit" : "Scroll edit");
+      await page
+        .getByRole("button", { name: "Save changes", exact: true })
+        .click();
+      await expect(page.locator("#dialog")).not.toBeVisible();
+      await expect(card).toContainText(
+        compact ? "Compact scroll edit" : "Scroll edit",
+      );
+      await expect
+        .poll(() => content.evaluate((element) => element.scrollTop))
+        .toBe(beforeEdit);
+    }
+  });
+}
+
 test("drag and dialog moves preserve board, column and page scroll positions", async ({
   page,
 }) => {

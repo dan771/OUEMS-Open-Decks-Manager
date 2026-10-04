@@ -1084,8 +1084,10 @@ function render(view = captureBoardView()) {
     );
   }
   updateCollaboration();
-  restoreBoardView(view);
+  // Hidden mobile columns have no scroll range. Show the selected night before
+  // restoring its position, otherwise the browser clamps scrollTop to zero.
   if (term) selectPage(selectedPage(term));
+  restoreBoardView(view);
   publishPresence();
 }
 function boardHTML(term) {
@@ -1171,8 +1173,8 @@ function inlineSets(term, night, shown, period) {
 function rerenderBoard() {
   const view = captureBoardView();
   if ($(".board")) $(".board").innerHTML = boardHTML(current());
-  restoreBoardView(view);
   if (current()) selectPage(selectedPage(current()));
+  restoreBoardView(view);
 }
 function openDialog(
   title,
