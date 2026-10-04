@@ -191,9 +191,9 @@ server.on("upgrade", async (req, socket, head) => {
           .webSocketMessage(ws, binary ? data : data.toString())
           .catch(() => ws.close(1011, "Reconnect to the board")),
       );
-      ws.on("close", () => {
+      ws.on("close", (code) => {
         sockets.delete(ws);
-        room.webSocketClose();
+        room.webSocketClose(ws, code);
       });
       ws.on("error", () => room.webSocketError(ws));
     });

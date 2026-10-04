@@ -62,13 +62,16 @@ const edit = {
   termId: term.id,
   profileId: profile.id,
   version: out.data.state.version,
-  fields: { name: "D1 test DJ" },
+  fields: { name: `D1 test DJ ${Date.now()}` },
 };
 out = await request("/api/action", edit);
 assert.equal(out.status, 200);
 assert.equal((await request("/api/action", edit)).status, 409);
 const reloaded = await request("/api/state");
-assert.equal(reloaded.data.state.terms.at(-1).profiles[0].name, "D1 test DJ");
+assert.equal(
+  reloaded.data.state.terms.find((t) => t.id === term.id).profiles[0].name,
+  edit.fields.name,
+);
 out = await request("/api/import", { termId: term.id, rows: sheet });
 assert.equal(out.data.result.added, 0);
 const newer = [...row];

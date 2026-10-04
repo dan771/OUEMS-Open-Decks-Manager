@@ -400,6 +400,46 @@ test("presence is scoped by board, expires, suppresses viewer editing and revoke
   assert.equal(b.readyState, 3);
 });
 
+test("live disconnection reciprocates the close and removes the organiser from presence", () => {
+  const env = environment();
+  const info = {
+    id: "connected",
+    userId: "organiser",
+    name: "Organiser",
+    role: "manager",
+    boardId: "one",
+    seen: Date.now(),
+    expires: Date.now() + 60000,
+  };
+  const departing = {
+    readyState: 1,
+    deserializeAttachment: () => info,
+    send: () => {},
+    close: (code) => {
+      assert.equal(code, 1000);
+      departing.readyState = 3;
+    },
+  };
+  const sent = [];
+  const remaining = {
+    readyState: 1,
+    deserializeAttachment: () => ({ ...info, id: "remaining" }),
+    send: (message) => sent.push(JSON.parse(message)),
+  };
+  const room = new CollaborationHub(
+    { getWebSockets: () => [departing, remaining] },
+    env,
+  );
+  room.presence();
+  assert.equal(sent.at(-1).peers.length, 2);
+  room.webSocketClose(departing, 1005);
+  assert.equal(departing.readyState, 3);
+  assert.deepEqual(
+    sent.at(-1).peers.map((peer) => peer.id),
+    ["remaining"],
+  );
+});
+
 test("board activity includes creation, imports and restores without private values", async () => {
   const env = environment();
   const initial = await env.STORE.load();

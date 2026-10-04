@@ -11,7 +11,8 @@
     "demo:reset": "node scripts/reset-demo.mjs",
     "format": "prettier --write public server tests scripts *.js *.json *.jsonc *.md",
     "deploy": "wrangler deploy",
-    "cf:dev": "wrangler dev --config wrangler.local.json --port 8791"
+    "cf:dev": "wrangler dev --config wrangler.local.json --port 8791",
+    "check:capacity": "node scripts/check-capacity-worker.mjs"
   },
   "engines": {
     "node": ">=22.13"

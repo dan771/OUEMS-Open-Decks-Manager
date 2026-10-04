@@ -73,7 +73,9 @@ Export downloads boards and retained history. Accounts, hashes, sessions and sav
 
 ## Cloudflare hosting
 
-Storage is designed for a small workspace. Password hashing adds deliberate computation cost; do not assume Workers Free's 10 ms CPU budget supports login/account operations. Validate your target hosting plan or use one with sufficient CPU. All static application requests now pass through the Worker to enforce login. No hosting plan is changed by this repository. See [Workers CPU limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time) and [authenticated asset routing](https://developers.cloudflare.com/workers/static-assets/routing/worker-script/). The platform allowances below remain useful for planning:
+The app supports 2–3 simultaneous organisers and is designed to run on **Workers Free**, using its free `workers.dev` hostname. The local Cloudflare simulation passed with three distinct accounts, 200 DJs, concurrent edits, live presence, reconnects and session revocation. See [CLOUDFLARE-AUDIT.md](CLOUDFLARE-AUDIT.md) for the evidence, assumptions and daily usage estimates.
+
+The public Worker gates assets and forwards API requests to a SQLite-backed **WorkspaceService Durable Object**. Password hashing, imports, saves and exports therefore use the Durable Object's default 30-second CPU budget rather than the Worker's 10 ms budget. Password security is unchanged; account operations queue to bound hashing memory. Live sockets connect directly to the separate hibernating CollaborationHub so they cannot keep WorkspaceService active. Both classes are supported on Workers Free. D1 remains the persistent database.
 
 | Resource                | Free allowance                         | Use here                               |
 | ----------------------- | -------------------------------------- | -------------------------------------- |
@@ -82,9 +84,11 @@ Storage is designed for a small workspace. Password hashing adds deliberate comp
 | D1 reads                | 5 million rows/day                     | Version checks and changed entities    |
 | D1 writes               | 100,000 rows/day                       | Changed entities, indexes and metadata |
 | D1 total storage        | 5 GB                                   | Form responses and planning data       |
-| Cloudflare Access       | Up to 50 users on Free                 | Your 2–3 organisers                    |
+| D1 database size        | 500 MB per database                    | This app uses one database             |
+| Durable Object requests | 100,000/day                            | API handling and live notifications    |
+| Durable Object duration | 13,000 GB-s/day                        | Active handlers; live hub hibernates   |
 
-Platform allowances: [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [D1](https://developers.cloudflare.com/d1/platform/pricing/), [Access](https://www.cloudflare.com/sase/products/access/). Domain registration is separate. This repository has not been deployed to your Cloudflare account.
+Platform allowances checked on 4 October 2026: [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), [D1 limits](https://developers.cloudflare.com/d1/platform/limits/), [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) and [CPU limits](https://developers.cloudflare.com/durable-objects/platform/limits/). Quotas are shared with other applications in the same account. On Free, exceeding Cloudflare allowances causes errors rather than automatic paid overages. Keep the account on Workers Free to avoid paid usage billing. A registered custom domain costs separately; use `workers.dev` for a zero-cost address. Standard Google Sheets API use within its quotas has no additional charge; CSV uploads need no Google service. This repository has not been deployed to your Cloudflare account.
 
 ### Deploy
 
@@ -107,7 +111,7 @@ Platform allowances: [Workers](https://developers.cloudflare.com/workers/platfor
 
    Enter the private setup key at Wrangler's prompt. Do not put it in source/public assets. The deployment contains the five-minute Cron Trigger. No browser needs to be open for imports to run.
 
-4. In **Workers & Pages → ouems-open-decks → Settings → Domains & Routes**, add your chosen Custom Domain, e.g. **decks.ouems.com**. The domain must be an active Cloudflare zone in your account. Cloudflare sets up the DNS record and HTTPS certificate. [Custom Domain instructions](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
+4. Use the free HTTPS `workers.dev` URL returned by deployment. Optionally, in **Workers & Pages → ouems-open-decks → Settings → Domains & Routes**, add a Custom Domain, e.g. **decks.ouems.com**. The domain must be an active Cloudflare zone in your account; domain registration is separate. Cloudflare sets up the DNS record and HTTPS certificate. [Custom Domain instructions](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/).
 
 5. Visit the HTTPS site, enter the setup key, and create your Administrator login. Create Manager/Viewer accounts in **Users & roles**. The key cannot create another administrator once any account exists; remove the secret after setup if desired. Keep `LOCAL_DEV` out of production. Cloudflare Access can optionally add an outer gate but does not replace app accounts or grant roles.
 
@@ -154,4 +158,4 @@ D1 stores boards, profiles, card appearances and nights in separate rows. A save
 
 The Worker uses an authenticated hibernating Durable Object for live notifications and board presence. Its binding and class migration are included in `wrangler.jsonc`; deploy that configuration together with the code. Live sockets never carry form responses, passwords or session tokens. Origin and session CSRF checks protect upgrades, account/session revocations close affected connections, and expiry is checked during presence updates. A disconnected live channel cannot roll back a durable save. Destructive board/night deletions and workspace restores deliberately retain strict workspace revision checks and safety copies.
 
-The final deployment still needs your Cloudflare account, D1 ID, chosen hostname, administrator setup secret, suitable CPU allowance and Google service-account key. The local demo and automated tests do not require these credentials.
+Deploy the updated `wrangler.jsonc` together with the code: it includes the additional `workspace-v1` SQLite Durable Object class migration and WORKSPACE binding. No D1 data migration or password reset is required for this change. The final deployment still needs your Cloudflare account, D1 ID and administrator setup secret, plus a Google service-account key if using private Sheets. The local demo and automated tests do not require these credentials.

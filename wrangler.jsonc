@@ -2,6 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ouems-open-decks",
   "main": "worker.js",
+  "workers_dev": true,
   "compatibility_date": "2026-10-03",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
@@ -20,10 +21,14 @@
   ],
   "triggers": { "crons": ["*/5 * * * *"] },
   "durable_objects": {
-    "bindings": [{ "name": "COLLABORATION", "class_name": "CollaborationHub" }],
+    "bindings": [
+      { "name": "COLLABORATION", "class_name": "CollaborationHub" },
+      { "name": "WORKSPACE", "class_name": "WorkspaceService" },
+    ],
   },
   "migrations": [
     { "tag": "collaboration-v1", "new_sqlite_classes": ["CollaborationHub"] },
+    { "tag": "workspace-v1", "new_sqlite_classes": ["WorkspaceService"] },
   ],
   "observability": { "enabled": true },
 }

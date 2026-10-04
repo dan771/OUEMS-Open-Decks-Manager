@@ -206,7 +206,10 @@ export class CollaborationHub {
     this.send(socket, { type: "pong" });
     this.presence();
   }
-  webSocketClose() {
+  webSocketClose(socket, code = 1000) {
+    // Reciprocate for runtimes without automatic Close replies. This is also
+    // safe on newer compatibility dates which already complete the handshake.
+    socket.close(code === 1005 || code === 1006 ? 1000 : code, "");
     this.presence();
   }
   webSocketError(socket) {
