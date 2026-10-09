@@ -82,10 +82,13 @@
 }
 .night-actions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 5px;
   border-top: 1px solid var(--line);
   padding: 8px 10px;
+}
+.night-actions [data-action="add-picker"] {
+  grid-column: 1 / -1;
 }
 .scheduled-set {
   display: grid;

@@ -15,6 +15,7 @@ import {
   timeMinutes,
 } from "./lib/domain.js";
 import { prepareAction, equal, applyChanges } from "./lib/collaboration.js";
+import { nightPhoneNumbers } from "./lib/phone-export.js";
 import { LiveConnection } from "./lib/live.js";
 import { BoardSaveQueue } from "./lib/save-queue.js";
 const $ = (s) => document.querySelector(s);
@@ -1129,7 +1130,7 @@ function nightHTML(term, night, index) {
     <div class="column-content">
       ${groups}
     </div>
-    ${canEdit() ? `<div class="night-actions"><button class="small" data-action="plan-sets" data-id="${night.id}">${icon("configure")}Plan sets</button><button class="small" data-action="add-picker" data-id="${night.id}">${icon("plus")}Add a DJ to this night</button></div>` : ""}
+    ${canEdit() ? `<div class="night-actions"><button class="small" data-action="plan-sets" data-id="${night.id}">${icon("configure")}Plan sets</button><button class="small" data-action="copy-phones" data-id="${night.id}" title="Copy phone numbers for all DJs assigned to this night">${icon("copy")}Copy phones</button><button class="small" data-action="add-picker" data-id="${night.id}">${icon("plus")}Add a DJ to this night</button></div>` : ""}
   </section>`;
 }
 function inlineSets(term, night, shown, period) {
@@ -1348,6 +1349,37 @@ function editPayload() {
     })),
   };
 }
+async function copyNightPhones(id) {
+  if (!canEdit()) return;
+  const term = current();
+  const night = term?.nights.find((n) => n.id === id);
+  if (!night) return;
+  const { numbers, missing, assigned } = nightPhoneNumbers(term, id);
+  if (!numbers.length) {
+    notify(
+      assigned
+        ? "No phone numbers found for the DJs assigned to this night."
+        : "No DJs assigned to this night.",
+    );
+    return;
+  }
+  const text = numbers.join("\n");
+  const summary = `${numbers.length} phone number${numbers.length === 1 ? "" : "s"}${missing ? ` · ${missing} DJ${missing === 1 ? "" : "s"} without a phone number` : ""}.`;
+  try {
+    await navigator.clipboard.writeText(text);
+    notify(`Copied ${summary}`);
+  } catch {
+    openDialog(
+      "Copy phone numbers",
+      `${night.venue || dateLabel(night.date)} · ${summary} Select and copy the list below.`,
+      `<label for="phone-export">Phone numbers (one per line)</label><textarea id="phone-export" rows="8" readonly style="width:100%">${escape(text)}</textarea>`,
+      '<button data-action="close">Close</button>',
+    );
+    $("#phone-export").focus();
+    $("#phone-export").select();
+  }
+}
+
 function configureNight(id) {
   selectPage(id);
   const n = current().nights.find((n) => n.id === id);
@@ -1980,6 +2012,10 @@ document.addEventListener("click", async (event) => {
       sessionStorage.removeItem(draftKey());
       editCard(dialogInstance);
     }
+    return;
+  }
+  if (action === "copy-phones") {
+    await copyNightPhones(id);
     return;
   }
   if (action === "configure") {
